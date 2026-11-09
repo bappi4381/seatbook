@@ -2,6 +2,16 @@
     <form method="POST" action="{{ route('register') }}">
         @csrf
 
+        <!-- Role -->
+        <div class="mt-4">
+            <x-input-label for="role" :value="__('Register as')" />
+            <select id="role" name="role" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm" required>
+                <option value="attendee" @selected(old('role') === 'attendee')>Attendee</option>
+                <option value="organizer" @selected(old('role') === 'organizer')>Organizer</option>
+            </select>
+            <x-input-error :messages="$errors->get('role')" class="mt-2" />
+        </div>
+
         <!-- Name -->
         <div>
             <x-input-label for="name" :value="__('Name')" />

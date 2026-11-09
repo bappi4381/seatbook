@@ -29,4 +29,14 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function isOrganizer(): bool
+    {
+        return $this->role === 'organizer';
+    }
+
+    public function isAttendee(): bool
+    {
+        return $this->role === 'attendee';
+    }
 }
