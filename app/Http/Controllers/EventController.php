@@ -3,9 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Event;
+use App\Support\EventSeatCache;
 use App\Support\SeatState;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
 
@@ -69,16 +71,25 @@ class EventController extends Controller
     {
         Gate::authorize('view', $event);
 
-        $event->load([
-            'seats' => fn ($query) => $query->orderBy('row')->orderBy('number'),
-            'seats.hold',
-        ]);
+        $shared = Cache::remember(EventSeatCache::key($event->id), 2, function () use ($event) {
+            $event->load([
+                'seats' => fn ($query) => $query->orderBy('row')->orderBy('number'),
+                'seats.hold',
+            ]);
+
+            return $event->seats
+                ->map(fn ($seat) => SeatState::sharedPayload($seat))
+                ->values()
+                ->all();
+        });
 
         $user = auth()->user();
 
         return response()->json([
             'server_now' => now()->toIso8601String(),
-            'seats' => $event->seats->map(fn ($seat) => SeatState::payload($seat, $user))->values(),
+            'seats' => collect($shared)
+                ->map(fn (array $seat) => SeatState::personalize($seat, $user))
+                ->values(),
         ]);
     }
 }
