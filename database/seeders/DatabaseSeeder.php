@@ -7,8 +7,6 @@ use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use App\Models\Event;
 use App\Models\Seat;
-use App\Models\Booking;
-use App\Models\SeatHold;
 
 
 class DatabaseSeeder extends Seeder
