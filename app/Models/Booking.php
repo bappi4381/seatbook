@@ -8,8 +8,22 @@ class Booking extends Model
 {
     protected $fillable = ['user_id','event_id','status','total_amount'];
 
-    public function seats() 
-    { 
-        return $this->belongsToMany(Seat::class, 'booking_seats'); 
+    protected $casts = [
+        'total_amount' => 'decimal:2',
+    ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class);
+    }
+
+    public function seats()
+    {
+        return $this->belongsToMany(Seat::class, 'booking_seats');
     }
 }

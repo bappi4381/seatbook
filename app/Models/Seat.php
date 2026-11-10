@@ -8,12 +8,22 @@ class Seat extends Model
 {
     protected $fillable = ['event_id','label','row','number','price','status'];
 
-    public function event() 
-    { 
-        return $this->belongsTo(Event::class); 
+    protected $casts = [
+        'price' => 'decimal:2',
+    ];
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class);
     }
-    public function hold() 
-    { 
-        return $this->hasOne(SeatHold::class); 
-    }       
+
+    public function hold()
+    {
+        return $this->hasOne(SeatHold::class);
+    }
+
+    public function bookings()
+    {
+        return $this->belongsToMany(Booking::class, 'booking_seats');
+    }
 }
