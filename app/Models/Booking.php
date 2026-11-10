@@ -9,7 +9,7 @@ class Booking extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'event_id', 'status', 'total_amount'];
+    protected $fillable = ['user_id', 'event_id'];
 
     protected $casts = [
         'total_amount' => 'decimal:2',

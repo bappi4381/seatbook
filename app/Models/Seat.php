@@ -9,7 +9,7 @@ class Seat extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['event_id', 'label', 'row', 'number', 'price', 'status'];
+    protected $fillable = ['event_id', 'label', 'row', 'number', 'price'];
 
     protected $casts = [
         'price' => 'decimal:2',
