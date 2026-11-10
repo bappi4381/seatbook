@@ -7,20 +7,23 @@ use App\Models\Event;
 use App\Models\Seat;
 use App\Models\SeatHold;
 use App\Models\User;
+use App\Services\BookingService;
 use App\Services\SeatHoldService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
+/**
+ * Concurrency-related cases here run sequentially on SQLite in-memory by default
+ * (phpunit.xml). They prove the second conflicting attempt fails, not true parallel
+ * InnoDB races. To run the suite against MySQL: create a `seatbook_test` database,
+ * then `DB_CONNECTION=mysql DB_DATABASE=seatbook_test php artisan test`
+ * (phpunit.xml env values are not force-locked, so shell env overrides work).
+ */
 class BookingTest extends TestCase
 {
     use RefreshDatabase;
-
-    /**
-     * Real concurrent row-lock races need MySQL. These tests are sequential and prove
-     * the second conflicting attempt fails under SQLite in-memory (fine for CI).
-     */
     public function test_organizer_gets_forbidden_on_booking_routes(): void
     {
         $organizer = User::factory()->organizer()->create();
@@ -268,6 +271,92 @@ class BookingTest extends TestCase
 
         $this->assertSame('confirmed', $booking->fresh()->status);
         $this->assertSame('booked', $seat->fresh()->status);
+    }
+
+    public function test_confirm_unique_violation_returns_friendly_conflict_and_rolls_back(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $other = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1, 100);
+
+        $conflicting = new Booking;
+        $conflicting->user_id = $other->id;
+        $conflicting->event_id = $event->id;
+        $conflicting->status = 'confirmed';
+        $conflicting->total_amount = 100;
+        $conflicting->save();
+
+        DB::table('booking_seats')->insert([
+            'booking_id' => $conflicting->id,
+            'seat_id' => $seat->id,
+        ]);
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertCreated();
+
+        $this->actingAs($attendee)
+            ->from(route('events.show', $event))
+            ->post(route('events.bookings.store', $event))
+            ->assertRedirect(route('events.show', $event))
+            ->assertSessionHas('error', BookingService::CONFIRM_CONFLICT_MESSAGE);
+
+        $this->assertSame(1, Booking::count());
+        $this->assertDatabaseMissing('bookings', ['user_id' => $attendee->id]);
+        $this->assertDatabaseHas('seat_holds', [
+            'seat_id' => $seat->id,
+            'user_id' => $attendee->id,
+        ]);
+    }
+
+    public function test_cancel_leaves_active_hold_seat_as_held(): void
+    {
+        $owner = User::factory()->attendee()->create();
+        $other = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1, 100);
+        $booking = $this->bookSeat($owner, $event, $seat);
+
+        // Inconsistent fixture: active hold exists while seat is still on a booking.
+        SeatHold::create([
+            'seat_id' => $seat->id,
+            'user_id' => $other->id,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
+        $this->actingAs($owner)
+            ->delete(route('bookings.cancel', $booking))
+            ->assertRedirect(route('bookings.index'));
+
+        $this->assertSame('cancelled', $booking->fresh()->status);
+        $this->assertDatabaseMissing('booking_seats', ['seat_id' => $seat->id]);
+        $this->assertSame('held', $seat->fresh()->status);
+        $this->assertDatabaseHas('seat_holds', [
+            'seat_id' => $seat->id,
+            'user_id' => $other->id,
+        ]);
+    }
+
+    public function test_confirm_request_cannot_mass_assign_status_or_total(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1, 175);
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertCreated();
+
+        $this->actingAs($attendee)->post(route('events.bookings.store', $event), [
+            'status' => 'cancelled',
+            'total_amount' => 1,
+        ])->assertRedirect();
+
+        $booking = Booking::where('user_id', $attendee->id)->firstOrFail();
+
+        $this->assertSame('confirmed', $booking->status);
+        $this->assertSame('175.00', $booking->total_amount);
     }
 
     private function bookSeat(User $attendee, Event $event, Seat $seat): Booking

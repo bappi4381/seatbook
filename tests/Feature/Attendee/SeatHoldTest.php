@@ -10,14 +10,17 @@ use App\Services\SeatHoldService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
+/**
+ * Concurrency-related cases here run sequentially on SQLite in-memory by default
+ * (phpunit.xml). They prove the second conflicting attempt fails, not true parallel
+ * InnoDB races. To run the suite against MySQL: create a `seatbook_test` database,
+ * then `DB_CONNECTION=mysql DB_DATABASE=seatbook_test php artisan test`
+ * (phpunit.xml env values are not force-locked, so shell env overrides work).
+ */
 class SeatHoldTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * Real concurrent row-lock races need MySQL. These tests are sequential and prove
-     * the second conflicting attempt fails under SQLite in-memory (fine for CI).
-     */
     public function test_organizer_gets_forbidden_on_hold_routes(): void
     {
         $organizer = User::factory()->organizer()->create();
@@ -211,14 +214,14 @@ class SeatHoldTest extends TestCase
             'user_id' => $attendee->id,
             'expires_at' => now()->subMinute(),
         ]);
-        $expiredSeat->update(['status' => 'held']);
+        Seat::whereKey($expiredSeat->id)->update(['status' => 'held']);
 
         SeatHold::create([
             'seat_id' => $activeSeat->id,
             'user_id' => $attendee->id,
             'expires_at' => now()->addMinutes(5),
         ]);
-        $activeSeat->update(['status' => 'held']);
+        Seat::whereKey($activeSeat->id)->update(['status' => 'held']);
 
         $this->artisan('holds:release-expired')
             ->expectsOutput('Released 1 expired hold(s).')
