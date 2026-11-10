@@ -7,6 +7,9 @@ use App\Models\Event;
 use App\Models\Seat;
 use App\Models\SeatHold;
 use App\Models\User;
+use App\Support\DatabaseContention;
+use App\Support\EventSeatCache;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -18,7 +21,7 @@ class BookingService
     public function confirm(Event $event, User $user): Booking
     {
         try {
-            return DB::transaction(function () use ($event, $user) {
+            $booking = DB::transaction(function () use ($event, $user) {
                 if ($event->starts_at->isPast()) {
                     throw new HttpException(409, 'This event has already started.');
                 }
@@ -64,65 +67,81 @@ class BookingService
                 SeatHold::query()->whereIn('id', $holds->pluck('id'))->delete();
 
                 return $booking->load(['seats', 'event']);
-            });
+            }, 3);
         } catch (UniqueConstraintViolationException) {
             throw new HttpException(409, self::CONFIRM_CONFLICT_MESSAGE);
+        } catch (QueryException $exception) {
+            DatabaseContention::throwIfLockFailure($exception);
+            throw $exception;
         }
+
+        EventSeatCache::forget($event->id);
+
+        return $booking;
     }
 
     public function cancel(Booking $booking): Booking
     {
-        return DB::transaction(function () use ($booking) {
-            // Lock order: booking row first, then seats ordered by id (same as confirm) to avoid deadlocks.
-            $booking = Booking::query()
-                ->whereKey($booking->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($booking->status !== 'confirmed') {
-                throw new HttpException(409, 'Only confirmed bookings can be cancelled.');
-            }
-
-            $booking->loadMissing('event', 'seats');
-
-            if ($booking->event->starts_at->isPast()) {
-                throw new HttpException(409, 'This booking can no longer be cancelled because the event has started.');
-            }
-
-            $seatIds = $booking->seats->pluck('id');
-
-            if ($seatIds->isNotEmpty()) {
-                Seat::query()
-                    ->whereIn('id', $seatIds)
-                    ->orderBy('id')
+        try {
+            $booking = DB::transaction(function () use ($booking) {
+                // Lock order: booking row first, then seats ordered by id (same as confirm) to avoid deadlocks.
+                $booking = Booking::query()
+                    ->whereKey($booking->id)
                     ->lockForUpdate()
-                    ->get();
-            }
+                    ->firstOrFail();
 
-            $booking->seats()->detach();
-            $booking->status = 'cancelled';
-            $booking->save();
-
-            if ($seatIds->isNotEmpty()) {
-                $activeHoldSeatIds = SeatHold::query()
-                    ->whereIn('seat_id', $seatIds)
-                    ->where('expires_at', '>', now())
-                    ->pluck('seat_id')
-                    ->all();
-
-                Seat::query()
-                    ->whereIn('id', $seatIds)
-                    ->whereNotIn('id', $activeHoldSeatIds)
-                    ->update(['status' => 'available']);
-
-                if ($activeHoldSeatIds !== []) {
-                    Seat::query()
-                        ->whereIn('id', $activeHoldSeatIds)
-                        ->update(['status' => 'held']);
+                if ($booking->status !== 'confirmed') {
+                    throw new HttpException(409, 'Only confirmed bookings can be cancelled.');
                 }
-            }
 
-            return $booking->fresh(['seats', 'event']);
-        });
+                $booking->loadMissing('event', 'seats');
+
+                if ($booking->event->starts_at->isPast()) {
+                    throw new HttpException(409, 'This booking can no longer be cancelled because the event has started.');
+                }
+
+                $seatIds = $booking->seats->pluck('id');
+
+                if ($seatIds->isNotEmpty()) {
+                    Seat::query()
+                        ->whereIn('id', $seatIds)
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get();
+                }
+
+                $booking->seats()->detach();
+                $booking->status = 'cancelled';
+                $booking->save();
+
+                if ($seatIds->isNotEmpty()) {
+                    $activeHoldSeatIds = SeatHold::query()
+                        ->whereIn('seat_id', $seatIds)
+                        ->where('expires_at', '>', now())
+                        ->pluck('seat_id')
+                        ->all();
+
+                    Seat::query()
+                        ->whereIn('id', $seatIds)
+                        ->whereNotIn('id', $activeHoldSeatIds)
+                        ->update(['status' => 'available']);
+
+                    if ($activeHoldSeatIds !== []) {
+                        Seat::query()
+                            ->whereIn('id', $activeHoldSeatIds)
+                            ->update(['status' => 'held']);
+                    }
+                }
+
+                return $booking->fresh(['seats', 'event']);
+            }, 3);
+        } catch (QueryException $exception) {
+            DatabaseContention::throwIfLockFailure($exception);
+            throw $exception;
+        }
+
+        EventSeatCache::forget($booking->event_id);
+
+        return $booking;
     }
 }
