@@ -32,7 +32,7 @@ Route::middleware(['auth', 'role:organizer'])->prefix('organizer')->name('organi
 
 Route::middleware(['auth', 'role:attendee'])->group(function () {
     Route::post('/events/{event}/holds', [HoldController::class, 'store'])
-        ->middleware('throttle:20,1')
+        ->middleware(['throttle:20,1', 'throttle:seat-hold'])
         ->name('events.holds.store');
     Route::delete('/events/{event}/holds', [HoldController::class, 'destroy'])
         ->name('events.holds.destroy');
