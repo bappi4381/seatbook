@@ -5,25 +5,29 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>{{ config('app.name', 'SEATBOOK') }}</title>
 
-        <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">
-        <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
+        <link href="https://fonts.bunny.net/css?family=fraunces:600,700|outfit:400,500,600,700&display=swap" rel="stylesheet" />
 
-        <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="font-sans text-gray-900 antialiased">
-        <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100">
-            <div>
-                <a href="/">
-                    <x-application-logo class="w-20 h-20 fill-current text-gray-500" />
-                </a>
-            </div>
+    <body class="font-sans antialiased">
+        <div class="relative min-h-screen overflow-hidden bg-slate-950">
+            <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.22),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.18),_transparent_35%)]"></div>
 
-            <div class="w-full sm:max-w-md mt-6 px-6 py-4 bg-white shadow-md overflow-hidden sm:rounded-lg">
-                {{ $slot }}
+            <div class="relative flex min-h-screen flex-col justify-center px-4 py-10 sm:px-6 lg:px-8">
+                <div class="mx-auto mb-8">
+                    <a href="{{ url('/') }}" class="rounded-xl focus-visible:ring-2 focus-visible:ring-brand-400">
+                        <x-application-logo class="text-white [&_span:last-child]:text-white" />
+                    </a>
+                </div>
+
+                <div class="mx-auto w-full max-w-md">
+                    <x-card class="shadow-soft">
+                        {{ $slot }}
+                    </x-card>
+                </div>
             </div>
         </div>
     </body>
