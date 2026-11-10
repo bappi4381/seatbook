@@ -56,20 +56,42 @@ Alpine.data('seatMap', (config) => ({
             }));
     },
 
-    seatClass(seat) {
-        if (this.selectedIds.includes(seat.id)) {
-            return 'seat-btn bg-brand-700 text-white border-brand-800 ring-2 ring-brand-300';
+    rowSegments(seats) {
+        if (seats.length <= 8) {
+            return { left: seats, right: [], showAisle: false };
         }
 
-        switch (seat.state) {
+        const mid = Math.floor(seats.length / 2);
+
+        return {
+            left: seats.slice(0, mid),
+            right: seats.slice(mid),
+            showAisle: true,
+        };
+    },
+
+    visualState(seat) {
+        if (this.selectedIds.includes(seat.id)) {
+            return 'selected';
+        }
+
+        return seat.state;
+    },
+
+    seatClass(seat) {
+        const base = 'seat-chair';
+
+        switch (this.visualState(seat)) {
+            case 'selected':
+                return `${base} seat-chair-selected`;
             case 'held_by_me':
-                return 'seat-btn bg-amber-400 text-amber-950 border-amber-500';
+                return `${base} seat-chair-held-me`;
             case 'held_by_others':
-                return 'seat-btn bg-orange-100 text-orange-900 border-orange-200 cursor-not-allowed opacity-80';
+                return `${base} seat-chair-held-others`;
             case 'booked':
-                return 'seat-btn bg-slate-400 text-white border-slate-500 cursor-not-allowed';
+                return `${base} seat-chair-booked`;
             default:
-                return 'seat-btn bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100';
+                return `${base} seat-chair-available`;
         }
     },
 
@@ -77,8 +99,14 @@ Alpine.data('seatMap', (config) => ({
         return this.isAttendee && seat.state === 'available';
     },
 
+    isUnavailable(seat) {
+        return seat.state === 'booked' || seat.state === 'held_by_others' || seat.state === 'held_by_me';
+    },
+
     seatAriaLabel(seat) {
-        return `Seat ${seat.label}, ${seat.state.replace(/_/g, ' ')}, ${Number(seat.price).toFixed(2)}`;
+        const state = this.visualState(seat).replace(/_/g, ' ');
+
+        return `Seat ${seat.label}, ${state}, ${Number(seat.price).toFixed(2)}`;
     },
 
     onSeatKeydown(event, seat) {
@@ -89,9 +117,45 @@ Alpine.data('seatMap', (config) => ({
     },
 
     countdownClass() {
-        return this.remainingSeconds() < 60
-            ? 'text-rose-700'
-            : 'text-amber-700';
+        const seconds = this.remainingSeconds();
+
+        if (seconds < 60) {
+            return 'bg-rose-600 text-white countdown-pulse animate-pulse';
+        }
+
+        if (seconds < 180) {
+            return 'bg-amber-400 text-amber-950';
+        }
+
+        return 'bg-brand-700 text-white';
+    },
+
+    countByState(state) {
+        if (state === 'selected') {
+            return this.selectedIds.length;
+        }
+
+        if (state === 'available') {
+            return this.seats.filter((seat) => seat.state === 'available' && !this.selectedIds.includes(seat.id)).length;
+        }
+
+        return this.seats.filter((seat) => seat.state === state).length;
+    },
+
+    money(value) {
+        return Number(value).toFixed(2);
+    },
+
+    removeSelected(seatId) {
+        this.selectedIds = this.selectedIds.filter((id) => id !== seatId);
+    },
+
+    primaryMobileAction() {
+        if (this.heldSeats().length > 0 && !this.holdExpired && this.remainingSeconds() > 0) {
+            return 'confirm';
+        }
+
+        return 'hold';
     },
 
     toggleSeat(seat) {

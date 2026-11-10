@@ -21,6 +21,7 @@ class EventController extends Controller
             ->withCount([
                 'seats',
                 'seats as booked_seats_count' => fn ($query) => $query->where('status', 'booked'),
+                'seats as available_seats_count' => fn ($query) => $query->where('status', '!=', 'booked'),
             ])
             ->latest()
             ->paginate(10);
@@ -68,7 +69,14 @@ class EventController extends Controller
     {
         Gate::authorize('update', $event);
 
-        $event->loadCount('seats');
+        $event->loadCount([
+            'seats',
+            'seats as booked_seats_count' => fn ($query) => $query->where('status', 'booked'),
+            'seats as available_seats_count' => fn ($query) => $query->where('status', '!=', 'booked'),
+        ]);
+        $event->load([
+            'bookings' => fn ($query) => $query->with(['user', 'seats'])->latest(),
+        ]);
 
         return view('organizer.events.edit', compact('event'));
     }
@@ -88,10 +96,10 @@ class EventController extends Controller
                 'status' => $data['status'],
             ]);
 
-            // Price applies only to seats with no hold and no booking;
+            // Price applies only to seats with no active hold and no booking;
             // seats already booked/held keep their existing price.
             $event->seats()
-                ->whereDoesntHave('hold')
+                ->whereDoesntHave('hold', fn ($query) => $query->where('expires_at', '>', now()))
                 ->whereDoesntHave('bookings')
                 ->update(['price' => $data['price']]);
         });

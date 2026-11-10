@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Seat extends Model
 {
-    protected $fillable = ['event_id','label','row','number','price','status'];
+    use HasFactory;
+
+    protected $fillable = ['event_id', 'label', 'row', 'number', 'price', 'status'];
 
     protected $casts = [
         'price' => 'decimal:2',

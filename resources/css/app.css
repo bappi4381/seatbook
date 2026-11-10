@@ -21,7 +21,63 @@
         @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
     }
 
-    .seat-btn {
-        @apply inline-flex h-9 min-w-9 items-center justify-center rounded-lg border px-1.5 text-[11px] font-semibold transition sm:h-10 sm:min-w-10 sm:text-xs;
+    .seat-chair {
+        @apply relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-t-xl rounded-b-md border-[1.5px] text-xs font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:h-11 sm:w-11;
+    }
+
+    .seat-chair-available {
+        @apply border-brand-600 bg-white text-brand-700 hover:-translate-y-0.5 hover:bg-brand-50;
+    }
+
+    .seat-chair-selected {
+        @apply border-brand-800 bg-brand-700 text-white ring-2 ring-brand-300 ring-offset-1;
+    }
+
+    .seat-chair-held-me {
+        @apply border-amber-500 bg-amber-300 text-amber-950;
+    }
+
+    .seat-chair-held-others {
+        @apply cursor-not-allowed border-amber-300 bg-amber-100 text-amber-900;
+    }
+
+    .seat-chair-booked {
+        @apply cursor-not-allowed border-slate-400 bg-slate-200 text-slate-400;
+    }
+
+    .seat-chair-booked:hover,
+    .seat-chair-held-others:hover {
+        @apply translate-y-0;
+    }
+
+    .seat-state-icon {
+        @apply pointer-events-none absolute -right-1 -top-1 h-3 w-3;
+    }
+
+    .seat-stage {
+        @apply relative mx-auto flex h-14 w-[min(100%,28rem)] items-center justify-center bg-slate-900 text-sm font-semibold tracking-[0.35em] text-white shadow-soft;
+        clip-path: polygon(6% 0, 94% 0, 100% 100%, 0 100%);
+        border-radius: 0.75rem 0.75rem 1.25rem 1.25rem;
+    }
+
+    .seat-stage::after {
+        content: '';
+        @apply pointer-events-none absolute inset-x-8 -bottom-3 h-6 rounded-full bg-brand-400/40 blur-md;
+    }
+
+    .seat-aisle {
+        @apply w-6 shrink-0 sm:w-8;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .seat-chair,
+    .seat-chair-available:hover {
+        transition: none !important;
+        transform: none !important;
+    }
+
+    .countdown-pulse {
+        animation: none !important;
     }
 }
