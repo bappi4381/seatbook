@@ -6,6 +6,9 @@ use App\Models\Event;
 use App\Models\Seat;
 use App\Models\SeatHold;
 use App\Models\User;
+use App\Support\DatabaseContention;
+use App\Support\EventSeatCache;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -27,8 +30,12 @@ class SeatHoldService
     {
         $seatIds = array_values(array_unique(array_map('intval', $seatIds)));
 
+        // Lock-free fast-fail only — an optimization under contention. The transaction
+        // locks plus the unique seat_holds.seat_id index remain the source of truth.
+        $this->assertSeatsLookAvailable($event, $user, $seatIds);
+
         try {
-            return DB::transaction(function () use ($event, $user, $seatIds) {
+            $holds = DB::transaction(function () use ($event, $user, $seatIds) {
                 if ($event->starts_at->isPast()) {
                     throw new HttpException(409, 'This event has already started.');
                 }
@@ -109,15 +116,22 @@ class SeatHoldService
                     ->whereHas('seat', fn ($query) => $query->where('event_id', $event->id))
                     ->with('seat')
                     ->get();
-            });
+            }, 3);
         } catch (UniqueConstraintViolationException) {
             throw new HttpException(409, self::CONFLICT_MESSAGE);
+        } catch (QueryException $exception) {
+            DatabaseContention::throwIfLockFailure($exception);
+            throw $exception;
         }
+
+        EventSeatCache::forget($event->id);
+
+        return $holds;
     }
 
     public function releaseForUser(Event $event, User $user): int
     {
-        return DB::transaction(function () use ($event, $user) {
+        $count = DB::transaction(function () use ($event, $user) {
             $holds = SeatHold::query()
                 ->where('user_id', $user->id)
                 ->whereHas('seat', fn ($query) => $query->where('event_id', $event->id))
@@ -137,6 +151,10 @@ class SeatHoldService
 
             return $holds->count();
         });
+
+        EventSeatCache::forget($event->id);
+
+        return $count;
     }
 
     public function releaseExpired(): int
@@ -152,6 +170,11 @@ class SeatHoldService
             }
 
             $seatIds = $holds->pluck('seat_id');
+            $eventIds = Seat::query()
+                ->whereIn('id', $seatIds)
+                ->pluck('event_id')
+                ->unique()
+                ->all();
 
             SeatHold::query()->whereIn('id', $holds->pluck('id'))->delete();
 
@@ -160,7 +183,42 @@ class SeatHoldService
                 ->where('status', 'held')
                 ->update(['status' => 'available']);
 
+            foreach ($eventIds as $eventId) {
+                EventSeatCache::forget((int) $eventId);
+            }
+
             return $holds->count();
         });
+    }
+
+    /**
+     * @param  list<int>  $seatIds
+     */
+    private function assertSeatsLookAvailable(Event $event, User $user, array $seatIds): void
+    {
+        if ($seatIds === []) {
+            return;
+        }
+
+        $bookedExists = Seat::query()
+            ->where('event_id', $event->id)
+            ->whereIn('id', $seatIds)
+            ->where('status', 'booked')
+            ->exists();
+
+        if ($bookedExists) {
+            throw new HttpException(409, self::CONFLICT_MESSAGE);
+        }
+
+        $heldByOther = SeatHold::query()
+            ->whereIn('seat_id', $seatIds)
+            ->where('expires_at', '>', now())
+            ->where('user_id', '!=', $user->id)
+            ->whereHas('seat', fn ($query) => $query->where('event_id', $event->id))
+            ->exists();
+
+        if ($heldByOther) {
+            throw new HttpException(409, self::CONFLICT_MESSAGE);
+        }
     }
 }
