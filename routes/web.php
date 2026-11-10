@@ -2,37 +2,18 @@
 
 use App\Http\Controllers\Attendee\BookingController;
 use App\Http\Controllers\Attendee\HoldController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventController;
+use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Organizer\EventController as OrganizerEventController;
 use App\Http\Controllers\ProfileController;
-use App\Models\Event;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    $events = Event::query()
-        ->where('status', 'published')
-        ->where('starts_at', '>', now())
-        ->withCount([
-            'seats',
-            'seats as available_seats_count' => fn ($query) => $query->where('status', '!=', 'booked'),
-        ])
-        ->withMin('seats', 'price')
-        ->orderBy('starts_at')
-        ->take(6)
-        ->get();
+Route::get('/', HomeController::class);
 
-    return view('welcome', compact('events'));
-});
-
-Route::get('/dashboard', function () {
-    $user = auth()->user();
-
-    if ($user->isOrganizer()) {
-        return redirect()->route('organizer.events.index');
-    }
-
-    return redirect()->route('events.index');
-})->middleware(['auth', 'verified'])->name('dashboard');
+Route::get('/dashboard', DashboardController::class)
+    ->middleware(['auth', 'verified'])
+    ->name('dashboard');
 
 Route::get('/events', [EventController::class, 'index'])->name('events.index');
 Route::get('/events/{event}', [EventController::class, 'show'])->name('events.show');
