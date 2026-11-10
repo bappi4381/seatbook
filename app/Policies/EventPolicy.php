@@ -4,24 +4,29 @@ namespace App\Policies;
 
 use App\Models\Event;
 use App\Models\User;
-use Illuminate\Auth\Access\Response;
 
 class EventPolicy
 {
     /**
      * Determine whether the user can view any models.
      */
-    public function viewAny(User $user): bool
+    public function viewAny(?User $user): bool
     {
-        return false;
+        return true;
     }
 
     /**
      * Determine whether the user can view the model.
      */
-    public function view(User $user, Event $event): bool
+    public function view(?User $user, Event $event): bool
     {
-        return false;
+        if ($event->status === 'draft') {
+            return $user !== null
+                && $user->isOrganizer()
+                && $user->id === $event->organizer_id;
+        }
+
+        return true;
     }
 
     /**
@@ -29,7 +34,7 @@ class EventPolicy
      */
     public function create(User $user): bool
     {
-        return false;
+        return $user->isOrganizer();
     }
 
     /**
@@ -37,7 +42,7 @@ class EventPolicy
      */
     public function update(User $user, Event $event): bool
     {
-       return $user->isOrganizer() && $user->id === $event->organizer_id;
+        return $user->isOrganizer() && $user->id === $event->organizer_id;
     }
 
     /**
