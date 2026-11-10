@@ -1,3 +1,27 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    html {
+        @apply scroll-smooth;
+    }
+
+    body {
+        @apply bg-slate-50 text-slate-900 antialiased;
+    }
+
+    :focus-visible {
+        @apply outline-none ring-2 ring-brand-500 ring-offset-2;
+    }
+}
+
+@layer components {
+    .seatbook-container {
+        @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+    }
+
+    .seat-btn {
+        @apply inline-flex h-9 min-w-9 items-center justify-center rounded-lg border px-1.5 text-[11px] font-semibold transition sm:h-10 sm:min-w-10 sm:text-xs;
+    }
+}
