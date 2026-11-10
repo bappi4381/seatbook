@@ -9,9 +9,12 @@ use App\Models\SeatHold;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\SeatHoldService;
+use App\Support\DatabaseContention;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PDOException;
 use Tests\TestCase;
 
 /**
@@ -357,6 +360,55 @@ class BookingTest extends TestCase
 
         $this->assertSame('confirmed', $booking->status);
         $this->assertSame('175.00', $booking->total_amount);
+    }
+
+    public function test_confirm_maps_deadlock_to_friendly_response(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1, 100);
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertCreated();
+
+        $pdo = new PDOException('Deadlock found when trying to get lock');
+        $pdo->errorInfo = ['40001', 1213, 'Deadlock found when trying to get lock'];
+        $exception = new QueryException('mysql', 'select * from seat_holds for update', [], $pdo);
+
+        DB::partialMock()
+            ->shouldReceive('transaction')
+            ->once()
+            ->andThrow($exception);
+
+        $this->actingAs($attendee)
+            ->from(route('events.show', $event))
+            ->post(route('events.bookings.store', $event))
+            ->assertRedirect(route('events.show', $event))
+            ->assertSessionHas('error', DatabaseContention::BUSY_MESSAGE);
+    }
+
+    public function test_cancel_maps_lock_wait_timeout_to_friendly_response(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1, 100);
+        $booking = $this->bookSeat($attendee, $event, $seat);
+
+        $pdo = new PDOException('Lock wait timeout exceeded');
+        $pdo->errorInfo = ['HY000', 1205, 'Lock wait timeout exceeded'];
+        $exception = new QueryException('mysql', 'select * from bookings for update', [], $pdo);
+
+        DB::partialMock()
+            ->shouldReceive('transaction')
+            ->once()
+            ->andThrow($exception);
+
+        $this->actingAs($attendee)
+            ->from(route('bookings.show', $booking))
+            ->delete(route('bookings.cancel', $booking))
+            ->assertRedirect(route('bookings.show', $booking))
+            ->assertSessionHas('error', DatabaseContention::BUSY_MESSAGE);
     }
 
     private function bookSeat(User $attendee, Event $event, Seat $seat): Booking

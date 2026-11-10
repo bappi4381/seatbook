@@ -7,7 +7,11 @@ use App\Models\Seat;
 use App\Models\SeatHold;
 use App\Models\User;
 use App\Services\SeatHoldService;
+use App\Support\DatabaseContention;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use PDOException;
 use Tests\TestCase;
 
 /**
@@ -231,6 +235,97 @@ class SeatHoldTest extends TestCase
         $this->assertDatabaseHas('seat_holds', ['seat_id' => $activeSeat->id]);
         $this->assertSame('available', $expiredSeat->fresh()->status);
         $this->assertSame('held', $activeSeat->fresh()->status);
+    }
+
+    public function test_fast_fail_returns_409_without_locking(): void
+    {
+        $holder = User::factory()->attendee()->create();
+        $challenger = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1);
+
+        $this->actingAs($holder)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertCreated();
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($challenger)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertStatus(409)
+            ->assertJson(['message' => SeatHoldService::CONFLICT_MESSAGE]);
+
+        $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+        $this->assertStringNotContainsStringIgnoringCase('for update', $sql);
+    }
+
+    public function test_deadlock_query_exception_is_mapped_to_friendly_response(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1);
+
+        $pdo = new PDOException('Deadlock found when trying to get lock');
+        $pdo->errorInfo = ['40001', 1213, 'Deadlock found when trying to get lock'];
+        $exception = new QueryException('mysql', 'select * from seats where id = ? for update', [], $pdo);
+
+        DB::partialMock()
+            ->shouldReceive('transaction')
+            ->once()
+            ->andThrow($exception);
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertStatus(503)
+            ->assertJson(['message' => DatabaseContention::BUSY_MESSAGE]);
+    }
+
+    public function test_seats_json_reflects_hold_after_cache_invalidation(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $other = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1);
+
+        $this->actingAs($other)
+            ->getJson(route('events.seats', $event))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $seat->id, 'state' => 'available']);
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertCreated();
+
+        $this->actingAs($attendee)
+            ->getJson(route('events.seats', $event))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $seat->id, 'state' => 'held_by_me']);
+
+        $this->actingAs($other)
+            ->getJson(route('events.seats', $event))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $seat->id, 'state' => 'held_by_others']);
+    }
+
+    public function test_seat_hold_rate_limiter_returns_429_after_limit(): void
+    {
+        $attendee = User::factory()->attendee()->create();
+        $event = Event::factory()->create();
+        $seat = $this->makeSeat($event, 'A1', 1);
+
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $this->actingAs($attendee)
+                ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+                ->assertSuccessful();
+        }
+
+        $this->actingAs($attendee)
+            ->postJson(route('events.holds.store', $event), ['seat_ids' => [$seat->id]])
+            ->assertStatus(429)
+            ->assertJson([
+                'message' => 'Too many hold attempts. Please wait a moment and try again.',
+            ]);
     }
 
     private function makeSeat(Event $event, string $label, int $number, float $price = 100): Seat
